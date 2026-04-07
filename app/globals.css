@@ -11,11 +11,8 @@ html {
 
 body {
   background-color: #f9fafb;
+  font-family: 'Inter', system-ui, sans-serif;
 }
 
-details > summary {
-  list-style: none;
-}
-details > summary::-webkit-details-marker {
-  display: none;
-}
+details > summary { list-style: none; }
+details > summary::-webkit-details-marker { display: none; }

@@ -1,9 +1,11 @@
 import type { Metadata, Viewport } from "next";
+import { SessionProvider } from "next-auth/react";
+import { auth } from "@/auth";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Ideas",
-  description: "Capture and organize your ideas with AI",
+  description: "AI-powered idea capture with Google integration",
 };
 
 export const viewport: Viewport = {
@@ -11,14 +13,17 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const session = await auth();
   return (
     <html lang="en">
-      <body className="min-h-screen bg-gray-50 font-sans">{children}</body>
+      <body>
+        <SessionProvider session={session}>{children}</SessionProvider>
+      </body>
     </html>
   );
 }

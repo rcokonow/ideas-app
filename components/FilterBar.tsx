@@ -2,51 +2,57 @@
 
 interface FilterBarProps {
   categories: string[];
-  activeFilter: string;
-  onFilter: (category: string) => void;
-  totalCount: number;
-  filteredCount: number;
+  active: string;
+  onFilter: (v: string) => void;
+  total: number;
+  filtered: number;
 }
 
 export default function FilterBar({
   categories,
-  activeFilter,
+  active,
   onFilter,
-  totalCount,
-  filteredCount,
+  total,
+  filtered,
 }: FilterBarProps) {
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex flex-wrap gap-2">
-        <button
-          onClick={() => onFilter("")}
-          className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-            activeFilter === ""
-              ? "bg-gray-800 text-white"
-              : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-          }`}
-        >
+        <Pill active={active === ""} onClick={() => onFilter("")}>
           All
-        </button>
+        </Pill>
         {categories.map((cat) => (
-          <button
-            key={cat}
-            onClick={() => onFilter(cat)}
-            className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-              activeFilter === cat
-                ? "bg-indigo-600 text-white"
-                : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
-            }`}
-          >
+          <Pill key={cat} active={active === cat} onClick={() => onFilter(cat)}>
             {cat}
-          </button>
+          </Pill>
         ))}
       </div>
       <p className="text-sm text-gray-400 flex-shrink-0">
-        {activeFilter
-          ? `${filteredCount} of ${totalCount} ideas`
-          : `${totalCount} idea${totalCount !== 1 ? "s" : ""}`}
+        {active ? `${filtered} of ${total}` : `${total} idea${total !== 1 ? "s" : ""}`}
       </p>
     </div>
+  );
+}
+
+function Pill({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+        active
+          ? "bg-gray-800 text-white"
+          : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+      }`}
+    >
+      {children}
+    </button>
   );
 }

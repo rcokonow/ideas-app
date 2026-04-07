@@ -1,16 +1,38 @@
+export interface ActionItem {
+  text: string;
+  dueDate: string; // YYYY-MM-DD
+  pushed: boolean;
+  taskId?: string;
+}
+
 export interface Idea {
   id: string;
-  raw_text: string;
+  submittedBy: string;
+  rawText: string;
   category: string;
   title: string;
   summary: string;
-  action_items: string[];
-  created_at: string;
+  actionItems: ActionItem[];
+  createdAt: string;
 }
 
 export interface Category {
-  id: string;
   name: string;
-  is_default: boolean;
-  created_at: string;
+  createdAt: string;
+}
+
+// What Claude returns before user review
+export interface ProcessedIdea {
+  title: string;
+  summary: string;
+  category: string;
+  actionItems: { text: string; dueDate: string }[];
+}
+
+// What the review panel works with (adds local IDs + checked state)
+export interface ReviewActionItem {
+  localId: string;
+  text: string;
+  dueDate: string;
+  checked: boolean;
 }

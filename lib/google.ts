@@ -252,7 +252,7 @@ async function generateIdeaId(
   // Count rows where column D matches this category
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: "Ideas!D2:D",
+    range: "Ideas!D:D",
   });
 
   const rows = res.data.values ?? [];
@@ -524,10 +524,11 @@ export async function getIdeas(accessToken: string, sheetId: string) {
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: "Ideas!A2:J",
+    range: "Ideas!A:J",
   });
 
-  const rows = res.data.values ?? [];
+  // Skip header row (row 1) — filter by checking that first cell isn't the header label
+  const rows = (res.data.values ?? []).slice(1);
   console.log("[getIdeas] raw row count:", rows.length, "first row:", JSON.stringify(rows[0]));
 
   const ideas = rows

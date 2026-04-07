@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { updateIdeaActionItems, createTask } from "@/lib/google";
+import { updateIdeaActionItems, createTask, getOrCreateTaskList } from "@/lib/google";
 import { ActionItem } from "@/types";
 
 export const dynamic = "force-dynamic";
@@ -16,16 +16,20 @@ export async function PATCH(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { actionItems } = await request.json();
+    const { actionItems, category } = await request.json();
 
+    let categoryTasksListId: string | undefined;
     const updatedItems: ActionItem[] = [];
     for (const item of actionItems as (ActionItem & { checked?: boolean })[]) {
       if (!item.pushed && item.checked) {
         let taskId: string | undefined;
         try {
+          if (!categoryTasksListId) {
+            categoryTasksListId = await getOrCreateTaskList(session.accessToken, category);
+          }
           taskId = await createTask(
             session.accessToken,
-            session.tasksListId,
+            categoryTasksListId,
             item.text,
             item.dueDate
           );

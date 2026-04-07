@@ -4,7 +4,6 @@ declare module "next-auth" {
   interface Session {
     accessToken: string;
     sheetId: string;
-    tasksListId: string;
     error?: string;
     user: DefaultSession["user"];
   }
@@ -16,7 +15,6 @@ declare module "next-auth/jwt" {
     refreshToken?: string;
     expiresAt?: number;
     sheetId?: string;
-    tasksListId?: string;
     error?: string;
   }
 }

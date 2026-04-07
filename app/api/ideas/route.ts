@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { getIdeas, appendIdea, createTask } from "@/lib/google";
+import { getIdeas, appendIdea, createTask, getOrCreateTaskList } from "@/lib/google";
 import { ActionItem } from "@/types";
 
 export const dynamic = "force-dynamic";
@@ -40,15 +40,19 @@ export async function POST(request: Request) {
       );
     }
 
-    // Push checked action items to Google Tasks
+    // Push checked action items to Google Tasks (category-specific list)
     const processedItems: ActionItem[] = [];
+    let categoryTasksListId: string | undefined;
     for (const item of actionItems as { text: string; dueDate: string; checked: boolean }[]) {
       let taskId: string | undefined;
-      if (item.checked && session.tasksListId) {
+      if (item.checked) {
         try {
+          if (!categoryTasksListId) {
+            categoryTasksListId = await getOrCreateTaskList(session.accessToken, category);
+          }
           taskId = await createTask(
             session.accessToken,
-            session.tasksListId,
+            categoryTasksListId,
             item.text,
             item.dueDate
           );

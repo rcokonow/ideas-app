@@ -415,12 +415,10 @@ async function ensureSheetTabs(
 
 export async function setupGoogleResources(accessToken: string): Promise<{
   sheetId: string;
-  tasksListId: string;
 }> {
   const auth = oauthClient(accessToken);
   const sheets = google.sheets({ version: "v4", auth });
   const drive = google.drive({ version: "v3", auth });
-  const tasks = google.tasks({ version: "v1", auth });
 
   // ── Find or create the "Ideas" spreadsheet ──
   let sheetId: string;
@@ -446,26 +444,7 @@ export async function setupGoogleResources(accessToken: string): Promise<{
   // Always ensure tabs + headers + seed data + formatting exist
   await ensureSheetTabs(accessToken, sheetId);
 
-  // ── Find or create "Ideas — Action Items" Tasks list ──
-  let tasksListId: string;
-
-  const listsResult = await tasks.tasklists.list({ maxResults: 100 });
-  const existingList = listsResult.data.items?.find(
-    (l) => l.title === "Ideas \u2014 Action Items"
-  );
-
-  if (existingList) {
-    tasksListId = existingList.id!;
-    console.log("[setup] Found existing tasks list:", tasksListId);
-  } else {
-    const newList = await tasks.tasklists.insert({
-      requestBody: { title: "Ideas \u2014 Action Items" },
-    });
-    tasksListId = newList.data.id!;
-    console.log("[setup] Created tasks list:", tasksListId);
-  }
-
-  return { sheetId, tasksListId };
+  return { sheetId };
 }
 
 // ─── Categories ───────────────────────────────────────────────────────────────
@@ -651,6 +630,30 @@ export async function updateIdeaActionItems(
 }
 
 // ─── Google Tasks ─────────────────────────────────────────────────────────────
+
+export async function getOrCreateTaskList(
+  accessToken: string,
+  categoryName: string
+): Promise<string> {
+  const auth = oauthClient(accessToken);
+  const tasks = google.tasks({ version: "v1", auth });
+
+  const listTitle = `Ideas \u2014 ${categoryName}`;
+
+  const listsResult = await tasks.tasklists.list({ maxResults: 100 });
+  const existing = listsResult.data.items?.find((l) => l.title === listTitle);
+
+  if (existing) {
+    console.log("[getOrCreateTaskList] Found existing list:", existing.id, "for:", categoryName);
+    return existing.id!;
+  }
+
+  const created = await tasks.tasklists.insert({
+    requestBody: { title: listTitle },
+  });
+  console.log("[getOrCreateTaskList] Created list:", created.data.id, "for:", categoryName);
+  return created.data.id!;
+}
 
 export async function createTask(
   accessToken: string,

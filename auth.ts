@@ -73,12 +73,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // Run setup on every sign-in so migrations always apply
         try {
           console.log("[auth] Running Google setup...");
-          const { sheetId, tasksListId } = await setupGoogleResources(
-            account.access_token!
-          );
+          const { sheetId } = await setupGoogleResources(account.access_token!);
           token.sheetId = sheetId;
-          token.tasksListId = tasksListId;
-          console.log("[auth] Setup complete. sheetId:", sheetId, "tasksListId:", tasksListId);
+          console.log("[auth] Setup complete. sheetId:", sheetId);
         } catch (err) {
           console.error("[auth] Google setup failed:", err);
           // If setup fails, keep any previously stored IDs (token may already have them)
@@ -99,7 +96,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async session({ session, token }) {
       session.accessToken = token.accessToken as string;
       session.sheetId = token.sheetId as string;
-      session.tasksListId = token.tasksListId as string;
       session.error = token.error as string | undefined;
       return session;
     },

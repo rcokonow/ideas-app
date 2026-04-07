@@ -39,6 +39,7 @@ interface IdeaCardProps {
   idea: Idea;
   onPushTask: (
     ideaId: string,
+    category: string,
     actionItems: (ActionItem & { checked?: boolean })[]
   ) => Promise<void>;
 }
@@ -57,7 +58,7 @@ export default function IdeaCard({ idea, onPushTask }: IdeaCardProps) {
     if (newlyChecked.length === 0) return;
     setPushing(true);
     try {
-      await onPushTask(idea.id, localItems);
+      await onPushTask(idea.id, idea.category, localItems);
       // Mark newly pushed items as pushed locally
       setLocalItems((prev) =>
         prev.map((a) => (a.checked && !a.pushed ? { ...a, pushed: true, checked: false } : a))

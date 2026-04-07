@@ -134,12 +134,13 @@ export default function Dashboard() {
   // ── Push additional tasks from card ──
   async function handlePushTask(
     ideaId: string,
+    category: string,
     actionItems: (ActionItem & { checked?: boolean })[]
   ) {
     const res = await fetch(`/api/ideas/${ideaId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ actionItems }),
+      body: JSON.stringify({ actionItems, category }),
     });
     if (!res.ok) {
       const d = await res.json();

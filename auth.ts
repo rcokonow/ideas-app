@@ -70,17 +70,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.refreshToken = account.refresh_token;
         token.expiresAt = account.expires_at;
 
-        // First-time setup: create Sheet + Tasks list
-        if (!token.sheetId) {
-          try {
-            const { sheetId, tasksListId } = await setupGoogleResources(
-              account.access_token!
-            );
-            token.sheetId = sheetId;
-            token.tasksListId = tasksListId;
-          } catch (err) {
-            console.error("Google setup failed:", err);
-          }
+        // Run setup on every sign-in so migrations always apply
+        try {
+          console.log("[auth] Running Google setup...");
+          const { sheetId, tasksListId } = await setupGoogleResources(
+            account.access_token!
+          );
+          token.sheetId = sheetId;
+          token.tasksListId = tasksListId;
+          console.log("[auth] Setup complete. sheetId:", sheetId, "tasksListId:", tasksListId);
+        } catch (err) {
+          console.error("[auth] Google setup failed:", err);
+          // If setup fails, keep any previously stored IDs (token may already have them)
         }
 
         return token;

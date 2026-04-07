@@ -7,11 +7,13 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const session = await auth();
+    console.log("[GET /api/categories] sheetId:", session?.sheetId, "hasToken:", !!session?.accessToken);
     if (!session?.accessToken || !session.sheetId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const categories = await getCategories(session.accessToken, session.sheetId);
+    console.log("[GET /api/categories] returning:", categories);
     return NextResponse.json(categories);
   } catch (err) {
     console.error("[GET /api/categories]", err);

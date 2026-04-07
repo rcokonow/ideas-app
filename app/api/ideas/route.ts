@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { getIdeas, appendIdea, createTask } from "@/lib/google";
 import { ActionItem } from "@/types";
-import { randomUUID } from "crypto";
 
 export const dynamic = "force-dynamic";
 
@@ -66,8 +65,7 @@ export async function POST(request: Request) {
       });
     }
 
-    const idea = {
-      id: randomUUID(),
+    const ideaData = {
       submittedBy: submittedBy || session.user?.name || "Unknown",
       rawText,
       category,
@@ -76,10 +74,10 @@ export async function POST(request: Request) {
       actionItems: processedItems,
     };
 
-    await appendIdea(session.accessToken, session.sheetId, idea);
+    const id = await appendIdea(session.accessToken, session.sheetId, ideaData);
 
     return NextResponse.json(
-      { ...idea, createdAt: new Date().toISOString() },
+      { id, ...ideaData, createdAt: new Date().toISOString() },
       { status: 201 }
     );
   } catch (err) {

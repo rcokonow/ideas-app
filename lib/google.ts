@@ -12,10 +12,257 @@ function oauthClient(accessToken: string) {
   return auth;
 }
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const GOOGLE_BLUE = { red: 0.259, green: 0.522, blue: 0.957 }; // #4285F4
+const WHITE = { red: 1, green: 1, blue: 1 };
+const LIGHT_GRAY = { red: 0.973, green: 0.976, blue: 0.980 }; // #F8F9FA
+// Columns A-J widths in pixels
+const COLUMN_WIDTHS = [120, 130, 280, 130, 220, 320, 280, 110, 180, 60];
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function safeParseJSON<T>(val: unknown, fallback: T): T {
+  if (typeof val !== "string") return fallback;
+  try {
+    return JSON.parse(val) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+/** Derive a 4-letter uppercase code from a category name (e.g. "Business Development" → "BUSI") */
+function deriveCategoryCode(name: string): string {
+  const letters = name.replace(/[^a-zA-Z]/g, "").toUpperCase();
+  return letters.substring(0, 4).padEnd(4, "X");
+}
+
+/** Format a Date as "Apr 7, 2026, 2:43 PM" */
+function formatTimestamp(date: Date): string {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(date);
+}
+
+/** Format action items array as plain readable text (one per line) */
+function formatActionItemsDisplay(items: ActionItem[]): string {
+  return items.map((item) => `• ${item.text} (due: ${item.dueDate})`).join("\n");
+}
+
+// ─── Sheet formatting ─────────────────────────────────────────────────────────
+
+async function applyIdeasSheetFormatting(
+  accessToken: string,
+  spreadsheetId: string
+): Promise<void> {
+  const auth = oauthClient(accessToken);
+  const sheets = google.sheets({ version: "v4", auth });
+
+  // Get sheetId for the "Ideas" tab
+  const meta = await sheets.spreadsheets.get({ spreadsheetId });
+  const ideasSheet = meta.data.sheets?.find(
+    (s) => s.properties?.title === "Ideas"
+  );
+  if (!ideasSheet) return;
+  const sheetId = ideasSheet.properties!.sheetId!;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const requests: any[] = [];
+
+  // 1. Header row: bold, light gray background
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 0, endRowIndex: 1 },
+      cell: {
+        userEnteredFormat: {
+          backgroundColor: LIGHT_GRAY,
+          textFormat: { bold: true },
+          verticalAlignment: "MIDDLE",
+        },
+      },
+      fields: "userEnteredFormat(backgroundColor,textFormat,verticalAlignment)",
+    },
+  });
+
+  // 2. Freeze row 1
+  requests.push({
+    updateSheetProperties: {
+      properties: { sheetId, gridProperties: { frozenRowCount: 1 } },
+      fields: "gridProperties.frozenRowCount",
+    },
+  });
+
+  // 3. Column widths (A–J)
+  COLUMN_WIDTHS.forEach((width, idx) => {
+    requests.push({
+      updateDimensionProperties: {
+        range: {
+          sheetId,
+          dimension: "COLUMNS",
+          startIndex: idx,
+          endIndex: idx + 1,
+        },
+        properties: { pixelSize: width },
+        fields: "pixelSize",
+      },
+    });
+  });
+
+  // 4. Data rows: vertical align TOP
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 1 },
+      cell: {
+        userEnteredFormat: {
+          verticalAlignment: "TOP",
+        },
+      },
+      fields: "userEnteredFormat.verticalAlignment",
+    },
+  });
+
+  // 5. Wrap on columns C (2), F (5), G (6) — 0-indexed
+  [2, 5, 6].forEach((colIdx) => {
+    requests.push({
+      repeatCell: {
+        range: {
+          sheetId,
+          startRowIndex: 1,
+          startColumnIndex: colIdx,
+          endColumnIndex: colIdx + 1,
+        },
+        cell: {
+          userEnteredFormat: {
+            wrapStrategy: "WRAP",
+          },
+        },
+        fields: "userEnteredFormat.wrapStrategy",
+      },
+    });
+  });
+
+  // 6. Hide column J (index 9) — JSON backup, not for human viewing
+  requests.push({
+    updateDimensionProperties: {
+      range: { sheetId, dimension: "COLUMNS", startIndex: 9, endIndex: 10 },
+      properties: { hiddenByUser: true },
+      fields: "hiddenByUser",
+    },
+  });
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: { requests },
+  });
+}
+
+/** Format a single newly-appended row (rowNumber is 1-based sheet row) */
+async function formatNewRow(
+  accessToken: string,
+  spreadsheetId: string,
+  rowNumber: number
+): Promise<void> {
+  const auth = oauthClient(accessToken);
+  const sheets = google.sheets({ version: "v4", auth });
+
+  const meta = await sheets.spreadsheets.get({ spreadsheetId });
+  const ideasSheet = meta.data.sheets?.find(
+    (s) => s.properties?.title === "Ideas"
+  );
+  if (!ideasSheet) return;
+  const sheetId = ideasSheet.properties!.sheetId!;
+  const rowIdx = rowNumber - 1; // 0-based
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const requests: any[] = [
+    // Vertical align TOP
+    {
+      repeatCell: {
+        range: {
+          sheetId,
+          startRowIndex: rowIdx,
+          endRowIndex: rowIdx + 1,
+        },
+        cell: { userEnteredFormat: { verticalAlignment: "TOP" } },
+        fields: "userEnteredFormat.verticalAlignment",
+      },
+    },
+    // Wrap on C (2), F (5), G (6)
+    ...[2, 5, 6].map((colIdx) => ({
+      repeatCell: {
+        range: {
+          sheetId,
+          startRowIndex: rowIdx,
+          endRowIndex: rowIdx + 1,
+          startColumnIndex: colIdx,
+          endColumnIndex: colIdx + 1,
+        },
+        cell: { userEnteredFormat: { wrapStrategy: "WRAP" } },
+        fields: "userEnteredFormat.wrapStrategy",
+      },
+    })),
+  ];
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: { requests },
+  });
+}
+
+// ─── Category code lookup ─────────────────────────────────────────────────────
+
+async function getCategoryCode(
+  accessToken: string,
+  sheetId: string,
+  categoryName: string
+): Promise<string> {
+  const auth = oauthClient(accessToken);
+  const sheets = google.sheets({ version: "v4", auth });
+
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: "Categories!A2:B",
+  });
+
+  const rows = res.data.values ?? [];
+  const match = rows.find((r) => r[1] === categoryName);
+  if (match) return match[0] as string;
+
+  // Fall back to deriving from name if category not found in sheet
+  return deriveCategoryCode(categoryName);
+}
+
+// ─── Readable ID generation ───────────────────────────────────────────────────
+
+async function generateIdeaId(
+  accessToken: string,
+  sheetId: string,
+  categoryName: string
+): Promise<string> {
+  const auth = oauthClient(accessToken);
+  const sheets = google.sheets({ version: "v4", auth });
+
+  const code = await getCategoryCode(accessToken, sheetId, categoryName);
+
+  // Count rows where column D matches this category
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: "Ideas!D2:D",
+  });
+
+  const rows = res.data.values ?? [];
+  const count = rows.filter((r) => r[0] === categoryName).length;
+  const seq = String(count + 1).padStart(4, "0");
+
+  return `${code}-${seq}`;
+}
+
 // ─── Ensure required tabs exist ───────────────────────────────────────────────
-// Called after both finding AND creating the spreadsheet.
-// Safely creates "Ideas" and "Categories" tabs if they're missing,
-// then seeds headers + default categories.
 
 async function ensureSheetTabs(
   accessToken: string,
@@ -34,8 +281,6 @@ async function ensureSheetTabs(
   const hasIdeas = existing.some((s) => s.title === "Ideas");
   const hasCategories = existing.some((s) => s.title === "Categories");
 
-  if (hasIdeas && hasCategories) return; // Nothing to do
-
   // 2. Build batchUpdate requests to create missing tabs
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const requests: any[] = [];
@@ -43,7 +288,6 @@ async function ensureSheetTabs(
   const categoriesMissing = !hasCategories;
 
   if (ideasMissing) {
-    // Rename "Sheet1" (or whatever the first unnamed tab is) → "Ideas"
     const sheet1 = existing.find(
       (s) => s.title === "Sheet1" || s.title === ""
     );
@@ -77,17 +321,16 @@ async function ensureSheetTabs(
     });
   }
 
-  // 3. Write headers (and seed categories) for newly created tabs
-  const now = new Date().toISOString();
+  // 3. Write headers and seed data for newly created tabs
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const valueRanges: any[] = [];
 
   if (ideasMissing) {
     valueRanges.push({
-      range: "Ideas!A1:I1",
+      range: "Ideas!A1:J1",
       values: [[
         "ID", "Submitted By", "Raw Text", "Category",
-        "Title", "Summary", "Action Items", "Tasks Pushed", "Created At",
+        "Title", "Summary", "Action Items", "Tasks Pushed", "Created At", "Action Items (JSON)",
       ]],
     });
   }
@@ -96,12 +339,61 @@ async function ensureSheetTabs(
     valueRanges.push({
       range: "Categories!A1:B4",
       values: [
-        ["Name", "Created At"],
-        ["Business Development", now],
-        ["Personal", now],
-        ["Open Question", now],
+        ["Code", "Name"],
+        ["BUSI", "Business Development"],
+        ["PERS", "Personal"],
+        ["OPEN", "Open Question"],
       ],
     });
+  } else {
+    // Migrate existing Categories tab: check if it uses old schema (Name | Created At)
+    const catMeta = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: "Categories!A1:B1",
+    });
+    const header = catMeta.data.values?.[0] ?? [];
+    if (header[0] === "Name" || (header[0] !== "Code" && header[1] !== "Name")) {
+      // Old schema — rewrite headers and migrate rows
+      const oldData = await sheets.spreadsheets.values.get({
+        spreadsheetId,
+        range: "Categories!A2:A",
+      });
+      const oldNames = (oldData.data.values ?? []).map((r) => r[0] as string).filter(Boolean);
+
+      const newRows = oldNames.map((name) => [deriveCategoryCode(name), name]);
+      valueRanges.push({
+        range: "Categories!A1:B1",
+        values: [["Code", "Name"]],
+      });
+      if (newRows.length > 0) {
+        // Clear old data and rewrite with code + name
+        await sheets.spreadsheets.values.clear({
+          spreadsheetId,
+          range: "Categories!A2:B",
+        });
+        valueRanges.push({
+          range: "Categories!A2:B",
+          values: newRows,
+        });
+      }
+    } else {
+      // New schema — fix any BUIS typo from earlier seeding
+      const catData = await sheets.spreadsheets.values.get({
+        spreadsheetId,
+        range: "Categories!A2:B",
+      });
+      const catRows = catData.data.values ?? [];
+      const fixedRows = catRows.map((r, i) =>
+        r[0] === "BUIS" ? { row: i + 2, values: ["BUSI", r[1]] } : null
+      ).filter(Boolean) as { row: number; values: string[] }[];
+
+      for (const fix of fixedRows) {
+        valueRanges.push({
+          range: `Categories!A${fix.row}:B${fix.row}`,
+          values: [fix.values],
+        });
+      }
+    }
   }
 
   if (valueRanges.length > 0) {
@@ -109,6 +401,13 @@ async function ensureSheetTabs(
       spreadsheetId,
       requestBody: { valueInputOption: "RAW", data: valueRanges },
     });
+  }
+
+  // 4. Apply Ideas sheet formatting (non-fatal — don't let formatting break tab setup)
+  try {
+    await applyIdeasSheetFormatting(accessToken, spreadsheetId);
+  } catch (err) {
+    console.error("[ensureSheetTabs] Formatting failed (non-fatal):", err);
   }
 }
 
@@ -137,7 +436,6 @@ export async function setupGoogleResources(accessToken: string): Promise<{
     sheetId = search.data.files[0].id!;
     console.log("[setup] Found existing spreadsheet:", sheetId);
   } else {
-    // Create a fresh spreadsheet — just the title; ensureSheetTabs handles the rest
     const created = await sheets.spreadsheets.create({
       requestBody: { properties: { title: "Ideas" } },
     });
@@ -145,7 +443,7 @@ export async function setupGoogleResources(accessToken: string): Promise<{
     console.log("[setup] Created new spreadsheet:", sheetId);
   }
 
-  // Always ensure tabs + headers + seed data exist (handles both paths above)
+  // Always ensure tabs + headers + seed data + formatting exist
   await ensureSheetTabs(accessToken, sheetId);
 
   // ── Find or create "Ideas — Action Items" Tasks list ──
@@ -179,13 +477,23 @@ export async function getCategories(
   const auth = oauthClient(accessToken);
   const sheets = google.sheets({ version: "v4", auth });
 
+  console.log("[getCategories] fetching from sheetId:", sheetId);
+
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: "Categories!A2:A",
+    range: "Categories!A1:B",
   });
 
+  console.log("[getCategories] raw rows:", JSON.stringify(res.data.values));
+
   const rows = res.data.values ?? [];
-  return rows.map((r) => r[0]).filter(Boolean);
+  // Skip header row; column B (index 1) is Name in new schema, column A (index 0) is Name in old schema
+  const header = rows[0] ?? [];
+  const nameCol = header[0] === "Code" ? 1 : 0;
+  const result = rows.slice(1).map((r) => r[nameCol]).filter(Boolean);
+
+  console.log("[getCategories] returning:", result);
+  return result;
 }
 
 export async function addCategory(
@@ -196,11 +504,13 @@ export async function addCategory(
   const auth = oauthClient(accessToken);
   const sheets = google.sheets({ version: "v4", auth });
 
+  const code = deriveCategoryCode(name);
+
   await sheets.spreadsheets.values.append({
     spreadsheetId: sheetId,
     range: "Categories!A:B",
     valueInputOption: "RAW",
-    requestBody: { values: [[name, new Date().toISOString()]] },
+    requestBody: { values: [[code, name]] },
   });
 }
 
@@ -210,13 +520,17 @@ export async function getIdeas(accessToken: string, sheetId: string) {
   const auth = oauthClient(accessToken);
   const sheets = google.sheets({ version: "v4", auth });
 
+  console.log("[getIdeas] fetching from sheetId:", sheetId);
+
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: "Ideas!A2:I",
+    range: "Ideas!A2:J",
   });
 
   const rows = res.data.values ?? [];
-  return rows
+  console.log("[getIdeas] raw row count:", rows.length, "first row:", JSON.stringify(rows[0]));
+
+  const ideas = rows
     .filter((r) => r[0])
     .map((r) => ({
       id: r[0] ?? "",
@@ -225,17 +539,20 @@ export async function getIdeas(accessToken: string, sheetId: string) {
       category: r[3] ?? "",
       title: r[4] ?? "",
       summary: r[5] ?? "",
-      actionItems: safeParseJSON<ActionItem[]>(r[6], []),
+      // Column J (r[9]) has JSON; fall back to column G (r[6]) for old rows
+      actionItems: safeParseJSON<ActionItem[]>(r[9] ?? r[6], []),
       createdAt: r[8] ?? "",
     }))
     .reverse();
+
+  console.log("[getIdeas] returning", ideas.length, "ideas");
+  return ideas;
 }
 
 export async function appendIdea(
   accessToken: string,
   sheetId: string,
   idea: {
-    id: string;
     submittedBy: string;
     rawText: string;
     category: string;
@@ -243,30 +560,52 @@ export async function appendIdea(
     summary: string;
     actionItems: ActionItem[];
   }
-): Promise<void> {
+): Promise<string> {
   const auth = oauthClient(accessToken);
   const sheets = google.sheets({ version: "v4", auth });
 
+  const id = await generateIdeaId(accessToken, sheetId, idea.category);
   const pushedCount = idea.actionItems.filter((a) => a.pushed).length;
+  const displayText = formatActionItemsDisplay(idea.actionItems);
+  const jsonText = JSON.stringify(idea.actionItems);
 
-  await sheets.spreadsheets.values.append({
+  const appendRes = await sheets.spreadsheets.values.append({
     spreadsheetId: sheetId,
-    range: "Ideas!A1",   // anchor to A1; Sheets API finds first empty row automatically
+    range: "Ideas!A1",
     valueInputOption: "RAW",
+    includeValuesInResponse: true,
     requestBody: {
       values: [[
-        idea.id,
+        id,
         idea.submittedBy,
         idea.rawText,
         idea.category,
         idea.title,
         idea.summary,
-        JSON.stringify(idea.actionItems),
+        displayText,
         pushedCount,
-        new Date().toISOString(),
+        formatTimestamp(new Date()),
+        jsonText,
       ]],
     },
   });
+
+  // Format the newly appended row
+  const updatedRange = appendRes.data.updates?.updatedRange;
+  if (updatedRange) {
+    // Parse row number from range like "Ideas!A5:J5"
+    const match = updatedRange.match(/!A(\d+)/);
+    if (match) {
+      const rowNumber = parseInt(match[1], 10);
+      try {
+        await formatNewRow(accessToken, sheetId, rowNumber);
+      } catch (err) {
+        console.error("[appendIdea] Failed to format row:", err);
+      }
+    }
+  }
+
+  return id;
 }
 
 export async function updateIdeaActionItems(
@@ -289,15 +628,23 @@ export async function updateIdeaActionItems(
 
   const sheetRow = rowIndex + 1;
   const pushedCount = actionItems.filter((a) => a.pushed).length;
+  const displayText = formatActionItemsDisplay(actionItems);
+  const jsonText = JSON.stringify(actionItems);
 
   await sheets.spreadsheets.values.batchUpdate({
     spreadsheetId: sheetId,
     requestBody: {
       valueInputOption: "RAW",
-      data: [{
-        range: `Ideas!G${sheetRow}:H${sheetRow}`,
-        values: [[JSON.stringify(actionItems), pushedCount]],
-      }],
+      data: [
+        {
+          range: `Ideas!G${sheetRow}:H${sheetRow}`,
+          values: [[displayText, pushedCount]],
+        },
+        {
+          range: `Ideas!J${sheetRow}`,
+          values: [[jsonText]],
+        },
+      ],
     },
   });
 }
@@ -320,15 +667,4 @@ export async function createTask(
   });
 
   return res.data.id!;
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function safeParseJSON<T>(val: unknown, fallback: T): T {
-  if (typeof val !== "string") return fallback;
-  try {
-    return JSON.parse(val) as T;
-  } catch {
-    return fallback;
-  }
 }

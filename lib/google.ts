@@ -126,8 +126,8 @@ async function applyIdeasSheetFormatting(
     },
   });
 
-  // 5. Wrap on columns C (2), F (5), G (6) — 0-indexed
-  [2, 5, 6].forEach((colIdx) => {
+  // 5. Wrap on columns C (2), D (3), E (4), F (5), G (6) — 0-indexed
+  [2, 3, 4, 5, 6].forEach((colIdx) => {
     requests.push({
       repeatCell: {
         range: {
@@ -192,8 +192,8 @@ async function formatNewRow(
         fields: "userEnteredFormat.verticalAlignment",
       },
     },
-    // Wrap on C (2), F (5), G (6)
-    ...[2, 5, 6].map((colIdx) => ({
+    // Wrap on C (2), D (3), E (4), F (5), G (6)
+    ...[2, 3, 4, 5, 6].map((colIdx) => ({
       repeatCell: {
         range: {
           sheetId,
@@ -409,6 +409,31 @@ async function ensureSheetTabs(
   } catch (err) {
     console.error("[ensureSheetTabs] Formatting failed (non-fatal):", err);
   }
+
+  // 5. Move Categories tab to last position
+  try {
+    const finalMeta = await sheets.spreadsheets.get({ spreadsheetId });
+    const finalSheets = finalMeta.data.sheets ?? [];
+    const catSheet = finalSheets.find((s) => s.properties?.title === "Categories");
+    if (catSheet) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          requests: [{
+            updateSheetProperties: {
+              properties: {
+                sheetId: catSheet.properties!.sheetId!,
+                index: finalSheets.length - 1,
+              },
+              fields: "index",
+            },
+          }],
+        },
+      });
+    }
+  } catch (err) {
+    console.error("[ensureSheetTabs] Failed to reorder Categories tab (non-fatal):", err);
+  }
 }
 
 // ─── First-time setup ─────────────────────────────────────────────────────────
@@ -529,6 +554,113 @@ export async function getIdeas(accessToken: string, sheetId: string) {
   return ideas;
 }
 
+// ─── Category tabs ────────────────────────────────────────────────────────────
+
+async function ensureCategoryTab(
+  accessToken: string,
+  spreadsheetId: string,
+  categoryName: string
+): Promise<void> {
+  const auth = oauthClient(accessToken);
+  const sheets = google.sheets({ version: "v4", auth });
+
+  const meta = await sheets.spreadsheets.get({ spreadsheetId });
+  const allSheets = meta.data.sheets ?? [];
+
+  const existing = allSheets.find((s) => s.properties?.title === categoryName);
+  if (existing) return;
+
+  // Insert before the Categories tab so Categories stays last
+  const categoriesSheet = allSheets.find((s) => s.properties?.title === "Categories");
+  const insertIndex = categoriesSheet
+    ? categoriesSheet.properties!.index!
+    : allSheets.length;
+
+  // Create the tab at the correct position
+  const addRes = await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [{ addSheet: { properties: { title: categoryName, index: insertIndex } } }],
+    },
+  });
+
+  const newSheetId =
+    addRes.data.replies?.[0]?.addSheet?.properties?.sheetId ?? 0;
+
+  // Write headers
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: `${categoryName}!A1:J1`,
+    valueInputOption: "RAW",
+    requestBody: {
+      values: [[
+        "ID", "Submitted By", "Raw Text", "Category",
+        "Title", "Summary", "Action Items", "Tasks Pushed", "Created At", "Action Items (JSON)",
+      ]],
+    },
+  });
+
+  // Format: bold light gray header, frozen row 1, column widths, wrap C/F/G, hide J
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const formatRequests: any[] = [
+    // Header row
+    {
+      repeatCell: {
+        range: { sheetId: newSheetId, startRowIndex: 0, endRowIndex: 1 },
+        cell: {
+          userEnteredFormat: {
+            backgroundColor: LIGHT_GRAY,
+            textFormat: { bold: true },
+            verticalAlignment: "MIDDLE",
+          },
+        },
+        fields: "userEnteredFormat(backgroundColor,textFormat,verticalAlignment)",
+      },
+    },
+    // Freeze row 1
+    {
+      updateSheetProperties: {
+        properties: { sheetId: newSheetId, gridProperties: { frozenRowCount: 1 } },
+        fields: "gridProperties.frozenRowCount",
+      },
+    },
+    // Column widths A–J
+    ...COLUMN_WIDTHS.map((width, idx) => ({
+      updateDimensionProperties: {
+        range: { sheetId: newSheetId, dimension: "COLUMNS", startIndex: idx, endIndex: idx + 1 },
+        properties: { pixelSize: width },
+        fields: "pixelSize",
+      },
+    })),
+    // Text wrap on C (2), D (3), E (4), F (5), G (6)
+    ...[2, 3, 4, 5, 6].map((colIdx) => ({
+      repeatCell: {
+        range: {
+          sheetId: newSheetId,
+          startRowIndex: 1,
+          startColumnIndex: colIdx,
+          endColumnIndex: colIdx + 1,
+        },
+        cell: { userEnteredFormat: { wrapStrategy: "WRAP" } },
+        fields: "userEnteredFormat.wrapStrategy",
+      },
+    })),
+    // Hide column J (index 9)
+    {
+      updateDimensionProperties: {
+        range: { sheetId: newSheetId, dimension: "COLUMNS", startIndex: 9, endIndex: 10 },
+        properties: { hiddenByUser: true },
+        fields: "hiddenByUser",
+      },
+    },
+  ];
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: { requests: formatRequests },
+  });
+}
+
 export async function appendIdea(
   accessToken: string,
   sheetId: string,
@@ -570,19 +702,44 @@ export async function appendIdea(
     },
   });
 
-  // Format the newly appended row
+  // Format the newly appended row in the master Ideas tab
   const updatedRange = appendRes.data.updates?.updatedRange;
   if (updatedRange) {
-    // Parse row number from range like "Ideas!A5:J5"
     const match = updatedRange.match(/!A(\d+)/);
     if (match) {
       const rowNumber = parseInt(match[1], 10);
       try {
         await formatNewRow(accessToken, sheetId, rowNumber);
       } catch (err) {
-        console.error("[appendIdea] Failed to format row:", err);
+        console.error("[appendIdea] Failed to format master row:", err);
       }
     }
+  }
+
+  // Also write to the category-specific tab
+  const row = [
+    id,
+    idea.submittedBy,
+    idea.rawText,
+    idea.category,
+    idea.title,
+    idea.summary,
+    displayText,
+    pushedCount,
+    formatTimestamp(new Date()),
+    jsonText,
+  ];
+
+  try {
+    await ensureCategoryTab(accessToken, sheetId, idea.category);
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: sheetId,
+      range: `${idea.category}!A1`,
+      valueInputOption: "RAW",
+      requestBody: { values: [row] },
+    });
+  } catch (err) {
+    console.error("[appendIdea] Failed to write category tab:", err);
   }
 
   return id;
